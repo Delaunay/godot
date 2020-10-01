@@ -42,6 +42,14 @@
 class GridMap : public Node3D {
 	GDCLASS(GridMap, Node3D);
 
+public:
+	enum GridMode {
+		MAP_RECTANGLE,
+		MAP_HEXAGON_FLAT,
+		MAP_HEXAGON_POINTY
+	};
+
+private:
 	enum {
 		MAP_DIRTY_TRANSFORMS = 1,
 		MAP_DIRTY_INSTANCES = 2,
@@ -146,6 +154,7 @@ class GridMap : public Node3D {
 
 	bool _in_tree;
 	Vector3 cell_size;
+	GridMode grid_mode;
 	int octant_size;
 	bool center_x, center_y, center_z;
 	float cell_scale;
@@ -233,6 +242,9 @@ public:
 	void set_cell_size(const Vector3 &p_size);
 	Vector3 get_cell_size() const;
 
+	void set_grid_mode(GridMode p_grid_mode);
+	GridMode get_grid_mode() const;
+
 	void set_octant_size(int p_size);
 	int get_octant_size() const;
 
@@ -246,6 +258,15 @@ public:
 	void set_cell_item(const Vector3i &p_position, int p_item, int p_rot = 0);
 	int get_cell_item(const Vector3i &p_position) const;
 	int get_cell_item_orientation(const Vector3i &p_position) const;
+
+	Vector3 rect_map_to_world(const Vector3i &p_map_position) const;
+	Vector3i rect_world_to_map(const Vector3 &p_world_position) const;
+
+	Vector3 hexflat_map_to_world(const Vector3i &p_map_position) const;
+	Vector3i hexflat_world_to_map(const Vector3 &p_world_position) const;
+
+	Vector3 hexpointy_map_to_world(const Vector3i &p_map_position) const;
+	Vector3i hexpointy_world_to_map(const Vector3 &p_world_position) const;
 
 	Vector3i world_to_map(const Vector3 &p_world_position) const;
 	Vector3 map_to_world(const Vector3i &p_map_position) const;
@@ -270,5 +291,8 @@ public:
 	GridMap();
 	~GridMap();
 };
+
+
+VARIANT_ENUM_CAST(GridMap::GridMode);
 
 #endif // GRID_MAP_H

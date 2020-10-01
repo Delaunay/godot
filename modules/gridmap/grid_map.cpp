@@ -207,6 +207,16 @@ Vector3 GridMap::get_cell_size() const {
 	return cell_size;
 }
 
+void GridMap::set_grid_mode(GridMode p_grid_mode) {
+	grid_mode = p_grid_mode;
+	_recreate_octant_data();
+	emit_signal("grid_mode_changed", p_grid_mode);
+}
+
+GridMap::GridMode GridMap::get_grid_mode() const {
+	return grid_mode;
+}
+
 void GridMap::set_octant_size(int p_size) {
 	ERR_FAIL_COND(p_size == 0);
 	octant_size = p_size;
@@ -350,7 +360,16 @@ int GridMap::get_cell_item_orientation(const Vector3i &p_position) const {
 	return cell_map[key].rot;
 }
 
-Vector3i GridMap::world_to_map(const Vector3 &p_world_position) const {
+Vector3 GridMap::rect_map_to_world(const Vector3i &p_map_position) const{
+	Vector3 offset = _get_offset();
+	Vector3 world_pos(
+			p_map_position.x * cell_size.x + offset.x,
+			p_map_position.y * cell_size.y + offset.y,
+			p_map_position.z * cell_size.z + offset.z);
+	return world_pos;
+}
+
+Vector3i GridMap::rect_world_to_map(const Vector3 &p_world_position) const{
 	Vector3 map_position = p_world_position / cell_size;
 	map_position.x = floor(map_position.x);
 	map_position.y = floor(map_position.y);
@@ -358,13 +377,69 @@ Vector3i GridMap::world_to_map(const Vector3 &p_world_position) const {
 	return Vector3i(map_position);
 }
 
-Vector3 GridMap::map_to_world(const Vector3i &p_map_position) const {
-	Vector3 offset = _get_offset();
-	Vector3 world_pos(
-			p_map_position.x * cell_size.x + offset.x,
-			p_map_position.y * cell_size.y + offset.y,
-			p_map_position.z * cell_size.z + offset.z);
+Vector3 cube_round(Vector3 cube);
+Vector2 cube_to_axial(Vector3 cube);
+Vector3 axial_to_cube(Vector2 hex);
+Vector2 hex_round(Vector2 hex);
+
+Vector3 GridMap::hexflat_map_to_world(const Vector3i &p_map_position) const{
+	// From https://www.redblobgames.com/grids/hexagons/#hex-to-pixel
+	Vector3 world_pos;
+
+	auto size = cell_size.x / 2.f;
+	world_pos.x = size * (3.f / 2.f) * p_map_position.x;
+	world_pos.z = size * (sqrt(3.f) / 2.f * p_map_position.x + sqrt(3.f) * p_map_position.z);
+	world_pos.y = p_map_position.y * cell_size.y + _get_offset().y;
+
 	return world_pos;
+}
+
+Vector3i GridMap::hexflat_world_to_map(const Vector3 &p_world_position) const{
+	// From https://www.redblobgames.com/grids/hexagons/#pixel-to-hex
+	auto size = cell_size.x / 2.f;
+
+	auto q = 2.f / 3.f * p_world_position.x / size;
+	auto r = (- 1.f / 3.f * p_world_position.x + sqrt(3.f) / 3.f * p_world_position.z) / size;
+	auto h = p_world_position.y / cell_size.y;
+
+	Vector2 pos = hex_round(Vector2(q, r));
+	Vector3 map_pos(pos.x, h, pos.y);
+	return map_pos;
+}
+
+Vector3 GridMap::hexpointy_map_to_world(const Vector3i &p_map_position) const{
+	return Vector3();
+}
+
+Vector3i GridMap::hexpointy_world_to_map(const Vector3 &p_world_position) const{
+	// Pointy
+	// auto q = (sqrt(3.f) / 3.f * p_world_pos.x - 1.f / 3.f * p_world_pos.y) / 2.f;
+	// auto r = 2.f / 3.f * p_world_pos.y / 2.f;
+	return Vector3i();
+}
+
+Vector3i GridMap::world_to_map(const Vector3 &p_world_position) const {
+	switch (grid_mode){
+		case MAP_HEXAGON_FLAT:
+			return hexflat_world_to_map(p_world_position);
+		case MAP_HEXAGON_POINTY:
+			return hexpointy_world_to_map(p_world_position);
+		default:
+		case MAP_RECTANGLE:
+			return rect_world_to_map(p_world_position);
+	}
+}
+
+Vector3 GridMap::map_to_world(const Vector3i &p_map_position) const {
+	switch (grid_mode){
+		case MAP_HEXAGON_FLAT:
+			return hexflat_map_to_world(p_map_position);
+		case MAP_HEXAGON_POINTY:
+			return hexpointy_map_to_world(p_map_position);
+		default:
+		case MAP_RECTANGLE:
+			return rect_map_to_world(p_map_position);
+	}
 }
 
 void GridMap::_octant_transform(const OctantKey &p_key) {
@@ -793,6 +868,9 @@ void GridMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_scale", "scale"), &GridMap::set_cell_scale);
 	ClassDB::bind_method(D_METHOD("get_cell_scale"), &GridMap::get_cell_scale);
 
+	ClassDB::bind_method(D_METHOD("set_grid_mode", "mode"), &GridMap::set_grid_mode);
+	ClassDB::bind_method(D_METHOD("get_grid_mode"), &GridMap::get_grid_mode);
+
 	ClassDB::bind_method(D_METHOD("set_octant_size", "size"), &GridMap::set_octant_size);
 	ClassDB::bind_method(D_METHOD("get_octant_size"), &GridMap::get_octant_size);
 
@@ -829,6 +907,7 @@ void GridMap::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_library", PROPERTY_HINT_RESOURCE_TYPE, "MeshLibrary"), "set_mesh_library", "get_mesh_library");
 	ADD_GROUP("Cell", "cell_");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "cell_size"), "set_cell_size", "get_cell_size");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_mode", PROPERTY_HINT_ENUM, "Rectangle,Hexagonal Flat,Hexagonal Pointy"), "set_grid_mode", "get_grid_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_octant_size", PROPERTY_HINT_RANGE, "1,1024,1"), "set_octant_size", "get_octant_size");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cell_center_x"), "set_center_x", "get_center_x");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cell_center_y"), "set_center_y", "get_center_y");
@@ -1036,6 +1115,7 @@ GridMap::GridMap() {
 	collision_mask = 1;
 
 	cell_size = Vector3(2, 2, 2);
+	grid_mode = MAP_RECTANGLE;
 	octant_size = 8;
 	awaiting_update = false;
 	_in_tree = false;
@@ -1060,4 +1140,40 @@ GridMap::~GridMap() {
 	}
 
 	clear();
+}
+
+Vector3 cube_round(Vector3 cube) {
+	auto rx = round(cube.x);
+	auto ry = round(cube.y);
+	auto rz = round(cube.z);
+
+	auto x_diff = abs(rx - cube.x);
+	auto y_diff = abs(ry - cube.y);
+	auto z_diff = abs(rz - cube.z);
+
+	if (x_diff > y_diff && x_diff > z_diff)
+		rx = -ry - rz;
+	else if (y_diff > z_diff)
+		ry = -rx - rz;
+	else
+		rz = -rx - ry;
+
+	return Vector3(rx, ry, rz);
+}
+
+Vector2 cube_to_axial(Vector3 cube) {
+	auto q = cube.x;
+	auto r = cube.z;
+	return Vector2(q, r);
+}
+
+Vector3 axial_to_cube(Vector2 hex) {
+	auto x = hex.x;
+	auto z = hex.y;
+	auto y = - x - z;
+	return Vector3(x, y, z);
+}
+
+Vector2 hex_round(Vector2 hex) {
+	return cube_to_axial(cube_round(axial_to_cube(hex)));
 }
