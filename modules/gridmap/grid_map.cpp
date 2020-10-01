@@ -434,14 +434,11 @@ bool GridMap::_octant_update(const OctantKey &p_key) {
 			continue;
 		}
 
-		Vector3 cellpos = Vector3(E->get().x, E->get().y, E->get().z);
-		Vector3 ofs = _get_offset();
-
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(c.rot);
-		xform.set_origin(cellpos * cell_size + ofs);
+		xform.set_origin(map_to_world(E->get()));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
+
 		if (baked_meshes.size() == 0) {
 			if (mesh_library->get_item_mesh(c.item).is_valid()) {
 				if (!multimesh_items.has(c.item)) {
@@ -894,7 +891,6 @@ Array GridMap::get_meshes() {
 		return Array();
 	}
 
-	Vector3 ofs = _get_offset();
 	Array meshes;
 
 	for (Map<IndexKey, Cell>::Element *E = cell_map.front(); E; E = E->next()) {
@@ -907,15 +903,9 @@ Array GridMap::get_meshes() {
 			continue;
 		}
 
-		IndexKey ik = E->key();
-
-		Vector3 cellpos = Vector3(ik.x, ik.y, ik.z);
-
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(E->get().rot);
-
-		xform.set_origin(cellpos * cell_size + ofs);
+		xform.set_origin(map_to_world(E->key()));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
 
 		meshes.push_back(xform);
@@ -962,13 +952,9 @@ void GridMap::make_baked_meshes(bool p_gen_lightmap_uv, float p_lightmap_uv_texe
 			continue;
 		}
 
-		Vector3 cellpos = Vector3(key.x, key.y, key.z);
-		Vector3 ofs = _get_offset();
-
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(E->get().rot);
-		xform.set_origin(cellpos * cell_size + ofs);
+		xform.set_origin(map_to_world(key));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
 
 		OctantKey ok;

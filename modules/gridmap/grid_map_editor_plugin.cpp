@@ -385,25 +385,16 @@ bool GridMapEditor::do_input_action(Camera3D *p_camera, const Point2 &p_point, b
 		}
 	}
 
-	int cell[3];
-	float cell_size[3] = { node->get_cell_size().x, node->get_cell_size().y, node->get_cell_size().z };
-
-	for (int i = 0; i < 3; i++) {
-		if (i == edit_axis) {
-			cell[i] = edit_floor[i];
-		} else {
-			cell[i] = inters[i] / node->get_cell_size()[i];
-			if (inters[i] < 0) {
-				cell[i] -= 1; // Compensate negative.
-			}
-			grid_ofs[i] = cell[i] * cell_size[i];
-		}
-	}
+	// Do a world->map->world conversion to snap our cursor to the grid
+	Vector3i map_pos = node->world_to_map(inters);
+	map_pos[edit_axis] = edit_floor[edit_axis];
+	Vector3 world_pos = node->map_to_world(map_pos);
+	grid_ofs = world_pos;
 
 	RS::get_singleton()->instance_set_transform(grid_instance[edit_axis], node->get_global_transform() * edit_grid_xform);
 
 	if (cursor_instance.is_valid()) {
-		cursor_origin = (Vector3(cell[0], cell[1], cell[2]) + Vector3(0.5 * node->get_center_x(), 0.5 * node->get_center_y(), 0.5 * node->get_center_z())) * node->get_cell_size();
+		cursor_origin = world_pos;
 		cursor_visible = true;
 
 		if (input_action == INPUT_SELECT || input_action == INPUT_PASTE) {
@@ -414,11 +405,11 @@ bool GridMapEditor::do_input_action(Camera3D *p_camera, const Point2 &p_point, b
 	}
 
 	if (input_action == INPUT_PASTE) {
-		paste_indicator.current = Vector3i(cell[0], cell[1], cell[2]);
+		paste_indicator.current = map_pos;
 		_update_paste_indicator();
 
 	} else if (input_action == INPUT_SELECT) {
-		selection.current = Vector3i(cell[0], cell[1], cell[2]);
+		selection.current = map_pos;
 		if (p_click) {
 			selection.click = selection.current;
 		}
@@ -427,7 +418,7 @@ bool GridMapEditor::do_input_action(Camera3D *p_camera, const Point2 &p_point, b
 
 		return true;
 	} else if (input_action == INPUT_PICK) {
-		int item = node->get_cell_item(Vector3i(cell[0], cell[1], cell[2]));
+		int item = node->get_cell_item(map_pos);
 		if (item >= 0) {
 			selected_palette = item;
 			mesh_library_palette->set_current(item);
@@ -438,23 +429,23 @@ bool GridMapEditor::do_input_action(Camera3D *p_camera, const Point2 &p_point, b
 	}
 	if (input_action == INPUT_PAINT) {
 		SetItem si;
-		si.position = Vector3i(cell[0], cell[1], cell[2]);
+		si.position = map_pos;
 		si.new_value = selected_palette;
 		si.new_orientation = cursor_rot;
-		si.old_value = node->get_cell_item(Vector3i(cell[0], cell[1], cell[2]));
-		si.old_orientation = node->get_cell_item_orientation(Vector3i(cell[0], cell[1], cell[2]));
+		si.old_value = node->get_cell_item(map_pos);
+		si.old_orientation = node->get_cell_item_orientation(map_pos);
 		set_items.push_back(si);
-		node->set_cell_item(Vector3i(cell[0], cell[1], cell[2]), selected_palette, cursor_rot);
+		node->set_cell_item(map_pos, selected_palette, cursor_rot);
 		return true;
 	} else if (input_action == INPUT_ERASE) {
 		SetItem si;
-		si.position = Vector3i(cell[0], cell[1], cell[2]);
+		si.position = map_pos;
 		si.new_value = -1;
 		si.new_orientation = 0;
-		si.old_value = node->get_cell_item(Vector3i(cell[0], cell[1], cell[2]));
-		si.old_orientation = node->get_cell_item_orientation(Vector3i(cell[0], cell[1], cell[2]));
+		si.old_value = node->get_cell_item(map_pos);
+		si.old_orientation = node->get_cell_item_orientation(map_pos);
 		set_items.push_back(si);
-		node->set_cell_item(Vector3i(cell[0], cell[1], cell[2]), -1);
+		node->set_cell_item(map_pos, -1);
 		return true;
 	}
 
