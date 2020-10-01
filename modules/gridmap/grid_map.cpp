@@ -38,6 +38,16 @@
 #include "scene/scene_string_names.h"
 #include "servers/visual_server.h"
 
+void GridMap::set_half_offset(HalfOffset p_half_offset) {
+  half_offset = p_half_offset;
+  _recreate_octant_data();
+  emit_signal("half_offset_changed", p_half_offset);
+}
+
+GridMap::HalfOffset GridMap::get_half_offset() const {
+  return half_offset;
+}
+
 bool GridMap::_set(const StringName &p_name, const Variant &p_value) {
 
 	String name = p_name;
@@ -211,14 +221,24 @@ Ref<MeshLibrary> GridMap::get_mesh_library() const {
 }
 
 void GridMap::set_cell_size(const Vector3 &p_size) {
-	ERR_FAIL_COND(p_size.x < 0.001 || p_size.y < 0.001 || p_size.z < 0.001);
-	cell_size = p_size;
-	_recreate_octant_data();
-	emit_signal("cell_size_changed", cell_size);
+  ERR_FAIL_COND(p_size.x < 0.001 || p_size.y < 0.001 || p_size.z < 0.001);
+  cell_size = p_size;
+  _recreate_octant_data();
+  emit_signal("cell_size_changed", cell_size);
 }
 Vector3 GridMap::get_cell_size() const {
 
-	return cell_size;
+  return cell_size;
+}
+
+void GridMap::set_cell_offset(const Vector3 &p_size) {;
+  cell_offset = p_size;
+  _recreate_octant_data();
+  emit_signal("cell_offset_changed", cell_size);
+}
+
+Vector3 GridMap::get_cell_offset() const {
+  return cell_offset;
 }
 
 void GridMap::set_octant_size(int p_size) {
@@ -370,20 +390,70 @@ int GridMap::get_cell_item_orientation(int p_x, int p_y, int p_z) const {
 	return cell_map[key].rot;
 }
 
+Vector3 cube_round(Vector3 cube){
+  auto rx = round(cube.x);
+  auto ry = round(cube.y);
+  auto rz = round(cube.z);
+
+  auto x_diff = abs(rx - cube.x);
+  auto y_diff = abs(ry - cube.y);
+  auto z_diff = abs(rz - cube.z);
+
+  if (x_diff > y_diff && x_diff > z_diff)
+    rx = -ry - rz;
+  else if (y_diff > z_diff)
+    ry = -rx - rz;
+  else
+    rz = -rx - ry;
+
+  return Vector3(rx, ry, rz);
+}
+
+Vector2 cube_to_axial(Vector3 cube){
+  auto q = cube.x;
+  auto r = cube.z;
+  return Vector2(q, r);
+}
+
+Vector3 axial_to_cube(Vector2 hex){
+  auto x = hex.x;
+  auto z = hex.y;
+  auto y = - x - z;
+  return Vector3(x, y, z);
+}
+
+Vector2 hex_round(Vector2 hex){
+  return cube_to_axial(cube_round(axial_to_cube(hex)));
+}
+
 Vector3 GridMap::world_to_map(const Vector3 &p_world_pos) const {
-	Vector3 map_pos = p_world_pos / cell_size;
-	map_pos.x = floor(map_pos.x);
-	map_pos.y = floor(map_pos.y);
-	map_pos.z = floor(map_pos.z);
+  // From https://www.redblobgames.com/grids/hexagons/#pixel-to-hex
+  //
+  // Pointy
+  // auto q = (sqrt(3.f) / 3.f * p_world_pos.x - 1.f / 3.f * p_world_pos.y) / 2.f;
+  // auto r = 2.f / 3.f * p_world_pos.y / 2.f;
+
+  //  Flat
+  auto size = cell_size.x / 2.f;
+  auto q = 2.f / 3.f * p_world_pos.x / size;
+  auto r = (- 1.f / 3.f * p_world_pos.x + sqrt(3.f) / 3.f * p_world_pos.z) / size;
+  auto h = p_world_pos.y / cell_size.y;
+
+  Vector2 pos = hex_round(Vector2(q, r));
+  Vector3 map_pos(pos.x, h, pos.y);
 	return map_pos;
 }
 
 Vector3 GridMap::map_to_world(int p_x, int p_y, int p_z) const {
-	Vector3 offset = _get_offset();
-	Vector3 world_pos(
-			p_x * cell_size.x + offset.x,
-			p_y * cell_size.y + offset.y,
-			p_z * cell_size.z + offset.z);
+  // From https://www.redblobgames.com/grids/hexagons/#hex-to-pixel
+  // Flat top
+  Vector3 world_pos;
+
+  auto size = cell_size.x / 2.f;
+  world_pos.x = size * (3.f / 2.f) * p_x;
+  world_pos.z = size * (sqrt(3.f) / 2.f * p_x + sqrt(3.f) * p_z);
+  world_pos.y = p_y * cell_size.y + _get_offset().y;
+
 	return world_pos;
 }
 
@@ -458,14 +528,13 @@ bool GridMap::_octant_update(const OctantKey &p_key) {
 		if (!mesh_library.is_valid() || !mesh_library->has_item(c.item))
 			continue;
 
-		Vector3 cellpos = Vector3(E->get().x, E->get().y, E->get().z);
-		Vector3 ofs = _get_offset();
+    IndexKey key = E->get();
 
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(c.rot);
-		xform.set_origin(cellpos * cell_size + ofs);
+    xform.set_origin(map_to_world(key.x, key.y, key.z));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
+
 		if (baked_meshes.size() == 0) {
 			if (mesh_library->get_item_mesh(c.item).is_valid()) {
 				if (!multimesh_items.has(c.item)) {
@@ -823,10 +892,16 @@ void GridMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_layer_bit", "bit"), &GridMap::get_collision_layer_bit);
 
 	ClassDB::bind_method(D_METHOD("set_mesh_library", "mesh_library"), &GridMap::set_mesh_library);
-	ClassDB::bind_method(D_METHOD("get_mesh_library"), &GridMap::get_mesh_library);
+  ClassDB::bind_method(D_METHOD("get_mesh_library"), &GridMap::get_mesh_library);
 
-	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &GridMap::set_cell_size);
-	ClassDB::bind_method(D_METHOD("get_cell_size"), &GridMap::get_cell_size);
+  ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &GridMap::set_cell_size);
+  ClassDB::bind_method(D_METHOD("get_cell_size"), &GridMap::get_cell_size);
+
+  ClassDB::bind_method(D_METHOD("set_cell_offset", "offset"), &GridMap::set_cell_offset);
+  ClassDB::bind_method(D_METHOD("get_cell_offset"), &GridMap::get_cell_offset);
+
+  ClassDB::bind_method(D_METHOD("set_half_offset", "half_offset"), &GridMap::set_half_offset);
+  ClassDB::bind_method(D_METHOD("get_half_offset"), &GridMap::get_half_offset);
 
 	ClassDB::bind_method(D_METHOD("set_cell_scale", "scale"), &GridMap::set_cell_scale);
 	ClassDB::bind_method(D_METHOD("get_cell_scale"), &GridMap::get_cell_scale);
@@ -866,7 +941,15 @@ void GridMap::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh_library", PROPERTY_HINT_RESOURCE_TYPE, "MeshLibrary"), "set_mesh_library", "get_mesh_library");
 	ADD_GROUP("Cell", "cell_");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "cell_size"), "set_cell_size", "get_cell_size");
+  ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "cell_size"), "set_cell_size", "get_cell_size");
+  ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "cell_offset"), "set_cell_offset", "get_cell_offset");
+  ADD_PROPERTY(PropertyInfo(
+                   Variant::INT,
+                   "cell_half_offset",
+                   PROPERTY_HINT_ENUM,
+                   "Offset X,Offset Z,Disabled,Offset Negative X,Offset Negative Z"),
+               "set_half_offset",
+               "get_half_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_octant_size", PROPERTY_HINT_RANGE, "1,1024,1"), "set_octant_size", "get_octant_size");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cell_center_x"), "set_center_x", "get_center_x");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cell_center_y"), "set_center_y", "get_center_y");
@@ -932,7 +1015,6 @@ Array GridMap::get_meshes() {
 	if (mesh_library.is_null())
 		return Array();
 
-	Vector3 ofs = _get_offset();
 	Array meshes;
 
 	for (Map<IndexKey, Cell>::Element *E = cell_map.front(); E; E = E->next()) {
@@ -940,19 +1022,16 @@ Array GridMap::get_meshes() {
 		int id = E->get().item;
 		if (!mesh_library->has_item(id))
 			continue;
+
 		Ref<Mesh> mesh = mesh_library->get_item_mesh(id);
 		if (mesh.is_null())
 			continue;
 
 		IndexKey ik = E->key();
 
-		Vector3 cellpos = Vector3(ik.x, ik.y, ik.z);
-
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(E->get().rot);
-
-		xform.set_origin(cellpos * cell_size + ofs);
+    xform.set_origin(map_to_world(ik.x, ik.y, ik.z));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
 
 		meshes.push_back(xform);
@@ -999,13 +1078,9 @@ void GridMap::make_baked_meshes(bool p_gen_lightmap_uv, float p_lightmap_uv_texe
 		if (!mesh.is_valid())
 			continue;
 
-		Vector3 cellpos = Vector3(key.x, key.y, key.z);
-		Vector3 ofs = _get_offset();
-
 		Transform xform;
-
 		xform.basis.set_orthogonal_index(E->get().rot);
-		xform.set_origin(cellpos * cell_size + ofs);
+    xform.set_origin(map_to_world(key.x, key.y, key.z));
 		xform.basis.scale(Vector3(cell_scale, cell_scale, cell_scale));
 
 		OctantKey ok;
@@ -1091,6 +1166,8 @@ GridMap::GridMap() {
 	collision_mask = 1;
 
 	cell_size = Vector3(2, 2, 2);
+  cell_offset = Vector3(0, 0, 0);
+  half_offset = HALF_OFFSET_DISABLED;
 	octant_size = 8;
 	awaiting_update = false;
 	_in_tree = false;

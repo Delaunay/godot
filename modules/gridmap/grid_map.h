@@ -48,6 +48,17 @@ class GridMap : public Spatial {
 		MAP_DIRTY_INSTANCES = 2,
 	};
 
+public:
+  // For hex grid
+  enum HalfOffset {
+    HALF_OFFSET_X,
+    HALF_OFFSET_Z,
+    HALF_OFFSET_DISABLED,
+    HALF_OFFSET_NEGATIVE_X,
+    HALF_OFFSET_NEGATIVE_Z,
+  };
+
+private:
 	union IndexKey {
 
 		struct {
@@ -143,7 +154,9 @@ class GridMap : public Spatial {
 	Transform last_transform;
 
 	bool _in_tree;
-	Vector3 cell_size;
+  HalfOffset half_offset;
+  Vector3 cell_size;
+  Vector3 cell_offset;
 	int octant_size;
 	bool center_x, center_y, center_z;
 	float cell_scale;
@@ -215,6 +228,9 @@ public:
 		INVALID_CELL_ITEM = -1
 	};
 
+  void set_half_offset(HalfOffset p_half_offset);
+  HalfOffset get_half_offset() const;
+
 	void set_collision_layer(uint32_t p_layer);
 	uint32_t get_collision_layer() const;
 
@@ -230,8 +246,11 @@ public:
 	void set_mesh_library(const Ref<MeshLibrary> &p_mesh_library);
 	Ref<MeshLibrary> get_mesh_library() const;
 
-	void set_cell_size(const Vector3 &p_size);
-	Vector3 get_cell_size() const;
+  void set_cell_size(const Vector3 &p_size);
+  Vector3 get_cell_size() const;
+
+  void set_cell_offset(const Vector3 &p_size);
+  Vector3 get_cell_offset() const;
 
 	void set_octant_size(int p_size);
 	int get_octant_size() const;
@@ -270,5 +289,7 @@ public:
 	GridMap();
 	~GridMap();
 };
+
+VARIANT_ENUM_CAST(GridMap::HalfOffset);
 
 #endif // GRID_MAP_H

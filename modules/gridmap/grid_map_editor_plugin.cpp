@@ -368,15 +368,19 @@ bool GridMapEditor::do_input_action(Camera *p_camera, const Point2 &p_point, boo
 
 	if (selected_palette < 0 && input_action != INPUT_PICK && input_action != INPUT_SELECT && input_action != INPUT_PASTE)
 		return false;
+
 	Ref<MeshLibrary> mesh_library = node->get_mesh_library();
+
 	if (mesh_library.is_null())
 		return false;
+
 	if (input_action != INPUT_PICK && input_action != INPUT_SELECT && input_action != INPUT_PASTE && !mesh_library->has_item(selected_palette))
 		return false;
 
 	Camera *camera = p_camera;
 	Vector3 from = camera->project_ray_origin(p_point);
 	Vector3 normal = camera->project_ray_normal(p_point);
+
 	Transform local_xform = node->get_global_transform().affine_inverse();
 	Vector<Plane> planes = camera->get_frustum();
 	from = local_xform.xform(from);
@@ -399,27 +403,23 @@ bool GridMapEditor::do_input_action(Camera *p_camera, const Point2 &p_point, boo
 			return false;
 	}
 
-	int cell[3];
-	float cell_size[3] = { node->get_cell_size().x, node->get_cell_size().y, node->get_cell_size().z };
+  // do a world->map->world conversion to snap our cursor
+  auto map_loc = node->world_to_map(inters);
 
-	for (int i = 0; i < 3; i++) {
+  // one of the axis is fixed
+  map_loc[edit_axis] = edit_floor[edit_axis];
 
-		if (i == edit_axis)
-			cell[i] = edit_floor[i];
-		else {
+  auto world_loc = node->map_to_world(map_loc[0], map_loc[1], map_loc[2]);
 
-			cell[i] = inters[i] / node->get_cell_size()[i];
-			if (inters[i] < 0)
-				cell[i] -= 1; // Compensate negative.
-			grid_ofs[i] = cell[i] * cell_size[i];
-		}
-	}
+  for (int i = 0; i < 3; ++i){
+    grid_ofs[i] = world_loc[i];
+  }
 
 	VS::get_singleton()->instance_set_transform(grid_instance[edit_axis], node->get_global_transform() * edit_grid_xform);
 
-	if (cursor_instance.is_valid()) {
+  if (cursor_instance.is_valid()) {
 
-		cursor_origin = (Vector3(cell[0], cell[1], cell[2]) + Vector3(0.5 * node->get_center_x(), 0.5 * node->get_center_y(), 0.5 * node->get_center_z())) * node->get_cell_size();
+    cursor_origin = world_loc;
 		cursor_visible = true;
 
 		if (input_action == INPUT_SELECT || input_action == INPUT_PASTE) {
@@ -431,12 +431,12 @@ bool GridMapEditor::do_input_action(Camera *p_camera, const Point2 &p_point, boo
 
 	if (input_action == INPUT_PASTE) {
 
-		paste_indicator.current = Vector3(cell[0], cell[1], cell[2]);
+    paste_indicator.current = map_loc;
 		_update_paste_indicator();
 
 	} else if (input_action == INPUT_SELECT) {
 
-		selection.current = Vector3(cell[0], cell[1], cell[2]);
+    selection.current = map_loc;
 		if (p_click)
 			selection.click = selection.current;
 		selection.active = true;
@@ -445,7 +445,7 @@ bool GridMapEditor::do_input_action(Camera *p_camera, const Point2 &p_point, boo
 		return true;
 	} else if (input_action == INPUT_PICK) {
 
-		int item = node->get_cell_item(cell[0], cell[1], cell[2]);
+    int item = node->get_cell_item(map_loc.x, map_loc.y, map_loc.z);
 		if (item >= 0) {
 			selected_palette = item;
 			mesh_library_palette->set_current(item);
@@ -456,23 +456,23 @@ bool GridMapEditor::do_input_action(Camera *p_camera, const Point2 &p_point, boo
 	}
 	if (input_action == INPUT_PAINT) {
 		SetItem si;
-		si.pos = Vector3(cell[0], cell[1], cell[2]);
+    si.pos = map_loc;
 		si.new_value = selected_palette;
 		si.new_orientation = cursor_rot;
-		si.old_value = node->get_cell_item(cell[0], cell[1], cell[2]);
-		si.old_orientation = node->get_cell_item_orientation(cell[0], cell[1], cell[2]);
+    si.old_value = node->get_cell_item(map_loc.x, map_loc.y, map_loc.z);
+    si.old_orientation = node->get_cell_item_orientation(map_loc.x, map_loc.y, map_loc.z);
 		set_items.push_back(si);
-		node->set_cell_item(cell[0], cell[1], cell[2], selected_palette, cursor_rot);
+    node->set_cell_item(map_loc.x, map_loc.y, map_loc.z, selected_palette, cursor_rot);
 		return true;
 	} else if (input_action == INPUT_ERASE) {
 		SetItem si;
-		si.pos = Vector3(cell[0], cell[1], cell[2]);
+    si.pos = Vector3(map_loc.x, map_loc.y, map_loc.z);
 		si.new_value = -1;
 		si.new_orientation = 0;
-		si.old_value = node->get_cell_item(cell[0], cell[1], cell[2]);
-		si.old_orientation = node->get_cell_item_orientation(cell[0], cell[1], cell[2]);
+    si.old_value = node->get_cell_item(map_loc.x, map_loc.y, map_loc.z);
+    si.old_orientation = node->get_cell_item_orientation(map_loc.x, map_loc.y, map_loc.z);
 		set_items.push_back(si);
-		node->set_cell_item(cell[0], cell[1], cell[2], -1);
+    node->set_cell_item(map_loc.x, map_loc.y, map_loc.z, -1);
 		return true;
 	}
 
@@ -695,7 +695,7 @@ bool GridMapEditor::forward_spatial_input_event(Camera *p_camera, const Ref<Inpu
 				return false;
 			}
 
-			return do_input_action(p_camera, Point2(mb->get_position().x, mb->get_position().y), true);
+      return do_input_action(p_camera, mb->get_position(), true);
 		} else {
 
 			if ((mb->get_button_index() == BUTTON_RIGHT && input_action == INPUT_ERASE) || (mb->get_button_index() == BUTTON_LEFT && input_action == INPUT_PAINT)) {
@@ -744,8 +744,7 @@ bool GridMapEditor::forward_spatial_input_event(Camera *p_camera, const Ref<Inpu
 	Ref<InputEventMouseMotion> mm = p_event;
 
 	if (mm.is_valid()) {
-
-		return do_input_action(p_camera, mm->get_position(), false);
+    return do_input_action(p_camera, mm->get_position(), false);
 	}
 
 	Ref<InputEventKey> k = p_event;
@@ -1030,9 +1029,20 @@ void GridMapEditor::_draw_grids(const Vector3 &cell_size) {
 	Vector<Vector3> grid_points[3];
 	Vector<Color> grid_colors[3];
 
-	for (int i = 0; i < 3; i++) {
+  // Rectangles need 2 Lines repeated GRID_CURSOR_SIZE times
+  // l1: p0 -> p1
+  // l2: p0 -> p2
+  // => need 3 points
 
-		Vector3 axis;
+  // Hex need 4 lines repeated GRID_CURSOR_SIZE times
+  // l1: p0 -> p1
+  // l2: p0 -> p2
+  // l3: p2 -> p3
+  // l4: p3 -> p4
+  // => need 5 points
+
+	for (int i = 0; i < 3; i++) { 
+    Vector3 axis; // (0, 0, 1)
 		axis[i] = 1;
 		Vector3 axis_n1;
 		axis_n1[(i + 1) % 3] = cell_size[(i + 1) % 3];
@@ -1040,7 +1050,6 @@ void GridMapEditor::_draw_grids(const Vector3 &cell_size) {
 		axis_n2[(i + 2) % 3] = cell_size[(i + 2) % 3];
 
 		for (int j = -GRID_CURSOR_SIZE; j <= GRID_CURSOR_SIZE; j++) {
-
 			for (int k = -GRID_CURSOR_SIZE; k <= GRID_CURSOR_SIZE; k++) {
 
 				Vector3 p = axis_n1 * j + axis_n2 * k;
@@ -1168,7 +1177,8 @@ void GridMapEditor::_update_cursor_instance() {
 			Ref<Mesh> mesh = node->get_mesh_library()->get_item_mesh(selected_palette);
 			if (!mesh.is_null() && mesh->get_rid().is_valid()) {
 
-				cursor_instance = VisualServer::get_singleton()->instance_create2(mesh->get_rid(), get_tree()->get_root()->get_world()->get_scenario());
+        cursor_instance = VisualServer::get_singleton()->instance_create2
+                          (mesh->get_rid(), get_tree()->get_root()->get_world()->get_scenario());
 				VisualServer::get_singleton()->instance_set_transform(cursor_instance, cursor_transform);
 			}
 		}
